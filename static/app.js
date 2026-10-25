@@ -101,6 +101,7 @@ function namingPool() {
           return null;
         }
         this.connection = "online";
+        this.clearError();
         return data;
       } catch (_) {
         this.connection = "offline";

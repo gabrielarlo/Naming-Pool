@@ -143,6 +143,29 @@ def test_join_validation_identity_reload_and_no_personal_fields(browser, ui_serv
         )
 
 
+def test_stale_error_clears_after_recovery(browser, ui_server):
+    with ExitStack() as stack:
+        context, page = open_page(browser, ui_server)
+        stack.callback(context.close)
+
+        state_failed = True
+
+        def handle_state(route):
+            nonlocal state_failed
+            if state_failed:
+                state_failed = False
+                route.abort()
+                return
+            route.fulfill(status=200, content_type="application/json", body="{}")
+
+        context.route("**/api/state", handle_state)
+
+        expect(page.get_by_role("alert")).to_be_visible()
+        expect(page.get_by_role("alert")).to_contain_text("Connection lost")
+
+        expect(page.get_by_role("alert")).to_be_hidden()
+
+
 def test_submission_stats_hidden_names_and_moderator_gate(browser, ui_server):
     with ExitStack() as stack:
         moderator_context, moderator = open_page(browser, ui_server)
