@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Naming Pool</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="/static/app.js"></script>
+    <script defer src="/static/vendor/alpine.min.js"></script>
+  </head>
+  <body>
+    <div class="page" x-data="namingPool()" x-cloak>
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Anonymous naming contest</p>
+          <h1>Naming Pool</h1>
+        </div>
+        <div class="status" x-show="state.joined">
+          <span class="badge" x-text="stageLabel"></span>
+          <span class="badge badge-quiet" x-show="state.is_moderator && state.stage !== 'closed'">Moderator</span>
+          <span class="badge badge-warn" x-show="connection === 'offline'">Reconnecting</span>
+        </div>
+      </header>
+
+      <main>
+        <div class="notice" role="status" aria-live="polite" x-show="notice" x-text="notice"></div>
+        <div class="alert" role="alert" x-show="error" x-text="error"></div>
+
+        <section class="card card-narrow" x-show="!state.joined">
+          <p class="eyebrow">Room access</p>
+          <h2>Enter the room</h2>
+          <p class="muted">Ask the host for the room code. You will not need an account.</p>
+          <form @submit.prevent="join()">
+            <label for="room-code">Room code</label>
+            <input
+              id="room-code"
+              x-model="joinCode"
+              type="password"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              required
+            />
+            <button type="submit" :disabled="busy || !joinCode.trim()">
+              <span x-show="!busy">Join room</span>
+              <span x-show="busy">Joining…</span>
+            </button>
+          </form>
+          <p class="hint">Moderator? Join first, then unlock the moderator panel.</p>
+        </section>
+
+        <div x-show="state.joined">
+          <section class="card stage-summary" aria-live="polite">
+            <div class="stage-copy">
+              <p class="eyebrow" x-text="stageEyebrow"></p>
+              <h2 x-text="stageHeading"></h2>
+              <p class="muted" x-text="stageDescription"></p>
+            </div>
+            <div class="stats">
+              <div class="stat" x-show="state.stage === 'submission'">
+                <strong><span x-text="state.own_suggestion_count"></span> / <span x-text="state.suggestion_limit"></span></strong>
+                <span>your names</span>
+              </div>
+              <div class="stat">
+                <strong x-text="state.total_suggestions"></strong>
+                <span>names in the pool</span>
+              </div>
+              <div class="stat" x-show="isVotingStage">
+                <strong x-text="state.voted_guests"></strong>
+                <span>guests voted</span>
+              </div>
+              <div class="stat" x-show="isVotingStage">
+                <strong x-text="state.online_guests"></strong>
+                <span>in the room</span>
+              </div>
+              <div class="stat" x-show="state.stage === 'submission'">
+                <strong x-text="state.min_suggestions_met ? 'Met' : submissionShortfall + ' more'"></strong>
+                <span>minimum <span x-text="state.min_suggestions"></span> to start</span>
+              </div>
+              <div class="stat" x-show="state.vote_allowance !== null">
+                <strong><span x-text="state.remaining_votes"></span> left</strong>
+                <span>of <span x-text="state.vote_allowance"></span> votes</span>
+              </div>
+              <span class="live-indicator" title="Live updates every 3 seconds">
+                <span class="live-dot" :class="{ beat: heartbeat }" aria-hidden="true"></span>
+                Live
+              </span>
+            </div>
+          </section>
+
+          <section class="card" x-show="state.stage === 'submission'">
+            <h3>Your suggestions</h3>
+            <p class="muted" x-show="state.own_suggestions.length === 0">
+              No names yet. Your first idea does not have to be perfect.
+            </p>
+            <ul class="suggestion-list" x-show="state.own_suggestions.length > 0">
+              <template x-for="suggestion in state.own_suggestions" :key="suggestion.id">
+                <li>
+                  <strong x-text="suggestion.name"></strong>
+                  <p x-text="suggestion.reason"></p>
+                </li>
+              </template>
+            </ul>
+
+            <form
+              class="suggestion-form"
+              x-show="state.can_submit"
+              @submit.prevent="submitSuggestion()"
+            >
+              <label for="suggestion-name">Name</label>
+              <input
+                id="suggestion-name"
+                x-model="newName"
+                maxlength="60"
+                autocomplete="off"
+                placeholder="e.g. Lantern"
+                required
+              />
+              <p class="field-meta"><span x-text="newName.length"></span> / 60</p>
+
+              <label for="suggestion-reason">Where it comes from, or why this name</label>
+              <textarea
+                id="suggestion-reason"
+                x-model="newReason"
+                maxlength="500"
+                rows="3"
+                placeholder="The story or logic behind the name…"
+                required
+              ></textarea>
+              <p class="field-meta"><span x-text="newReason.length"></span> / 500</p>
+
+              <button type="submit" :disabled="busy || !newName.trim() || !newReason.trim()">
+                Add name
+              </button>
+            </form>
+            <p class="hint" x-show="!state.can_submit">
+              You have used all five suggestions for this event.
+            </p>
+            <p class="hint">Other guests cannot see your names until voting starts.</p>
+          </section>
+
+          <section class="card" x-show="isVotingStage">
+            <div class="card-heading">
+              <div>
+                <h3 x-text="voteHeading"></h3>
+                <p class="muted">
+                  Select up to <span x-text="state.vote_allowance"></span>
+                  <span x-text="state.vote_allowance === 1 ? 'name' : 'names'"></span>.
+                </p>
+              </div>
+              <span class="counter">
+                <span x-text="draftVotes.length"></span> / <span x-text="state.vote_allowance"></span>
+              </span>
+            </div>
+
+            <div class="candidate-grid">
+              <template x-for="candidate in state.candidates" :key="candidate.id">
+                <button
+                  type="button"
+                  class="candidate"
+                  :class="{ selected: draftVotes.includes(candidate.id) }"
+                  :aria-pressed="draftVotes.includes(candidate.id) ? 'true' : 'false'"
+                  @click="toggleVote(candidate.id)"
+                >
+                  <span class="candidate-marker" aria-hidden="true"></span>
+                  <span class="candidate-body">
+                    <span class="candidate-name" x-text="candidate.name"></span>
+                    <span class="candidate-reason" x-show="candidate.reason" x-text="candidate.reason"></span>
+                  </span>
+                </button>
+              </template>
+            </div>
+
+            <div class="actions">
+              <button type="button" @click="saveVotes()" :disabled="busy">
+                Save votes
+              </button>
+              <button
+                type="button"
+                class="button-quiet"
+                @click="clearVotes()"
+                :disabled="busy || draftVotes.length === 0"
+              >
+                Clear selection
+              </button>
+            </div>
+            <p class="hint">Tallies stay hidden until the moderator closes this stage. You can change your selection until then.</p>
+          </section>
+
+          <section class="card winner-card" x-show="state.stage === 'closed'">
+            <p class="eyebrow">Winner</p>
+            <h2 x-text="state.winner ? state.winner.name : 'No winner'"></h2>
+            <p class="muted" x-show="state.winner" x-text="state.winner ? state.winner.reason : ''"></p>
+          </section>
+
+          <section class="card" x-show="state.results.length > 0">
+            <h3>Results</h3>
+            <template x-for="result in state.results" :key="result.stage">
+              <div class="result-block">
+                <h4 x-text="stageResultLabel(result.stage)"></h4>
+                <ol class="result-list">
+                  <template x-for="entry in result.entries" :key="entry.id">
+                    <li :class="{ advanced: entry.advanced }">
+                      <span class="rank" x-text="entry.rank"></span>
+                      <span class="result-body">
+                        <strong x-text="entry.name"></strong>
+                        <span class="result-reason" x-show="entry.reason" x-text="entry.reason"></span>
+                      </span>
+                      <span class="vote-total">
+                        <span x-text="entry.votes"></span>
+                        <span x-text="entry.votes === 1 ? 'vote' : 'votes'"></span>
+                      </span>
+                    </li>
+                  </template>
+                </ol>
+              </div>
+            </template>
+          </section>
+
+          <section class="card" x-show="state.is_moderator && state.stage !== 'closed'">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">Stage control</p>
+                <h3>Moderator panel</h3>
+              </div>
+              <span class="badge badge-quiet">Moderator</span>
+            </div>
+            <p class="muted">
+              Current stage: <strong x-text="stageLabel"></strong>. Closing a stage publishes its results and cannot be undone.
+            </p>
+            <p class="hint" x-show="state.stage === 'submission' && !state.min_suggestions_met">
+              <span x-text="state.total_suggestions"></span> of <span x-text="state.min_suggestions"></span> submitted;
+              <span x-text="submissionShortfall"></span> more needed before stage 1 can start.
+            </p>
+            <p class="hint" x-show="state.stage === 'submission' && state.min_suggestions_met">
+              Minimum met; stage 1 can start.
+            </p>
+            <button type="button" @click="openAdvanceDialog()" :disabled="busy || !state.can_advance">
+              <span x-text="advanceLabel"></span>
+            </button>
+            <p class="hint" x-show="state.stage === 'tiebreak'">
+              If the tiebreak is still tied, closing it resets the tiebreak votes so everyone can vote again.
+            </p>
+
+            <dialog
+              class="confirm-dialog"
+              x-ref="advanceDialog"
+              aria-labelledby="advance-dialog-title"
+              aria-describedby="advance-dialog-message"
+              @close="advanceDialogOpen = false"
+            >
+              <div class="confirm-dialog-body">
+                <p class="eyebrow">Confirm stage change</p>
+                <h4 id="advance-dialog-title" x-text="advanceDialogTitle"></h4>
+                <p id="advance-dialog-message" class="confirm-dialog-message" x-text="advanceDialogMessage"></p>
+                <div class="confirm-dialog-actions">
+                  <button type="button" class="button-quiet" @click="closeAdvanceDialog()" autofocus>
+                    Cancel
+                  </button>
+                  <button type="button" @click="confirmAdvance()" :disabled="busy">
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </dialog>
+          </section>
+
+          <section class="card" x-show="!state.is_moderator && state.stage !== 'closed'">
+            <details>
+              <summary>Moderator access</summary>
+              <form @submit.prevent="unlockModerator()">
+                <label for="moderator-code">Moderator code</label>
+                <input
+                  id="moderator-code"
+                  x-model="moderatorCode"
+                  type="password"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck="false"
+                />
+                <button type="submit" :disabled="busy || !moderatorCode.trim()">
+                  Unlock controls
+                </button>
+              </form>
+              <p class="hint">Only the moderator code can open and close voting stages.</p>
+            </details>
+          </section>
+        </div>
+      </main>
+
+      <footer>
+        <span>Anonymous suggestions. No accounts, no email.</span>
+        <span>Live updates every 3 seconds while this tab is visible.</span>
+      </footer>
+    </div>
+  </body>
+</html>
